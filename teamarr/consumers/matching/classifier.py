@@ -950,13 +950,30 @@ def extract_teams_from_separator(
     team2 = _clean_team_name(team2)
 
     # Validate: both teams should have substance
-    # Minimum 3 chars - even short team abbrevs are 3+ (USC, LSU, BYU, etc.)
-    if not team1 or len(team1) < 3:
+    if not _is_substantial_side(team1):
         team1 = None
-    if not team2 or len(team2) < 3:
+    if not _is_substantial_side(team2):
         team2 = None
 
     return team1, team2
+
+
+def _is_substantial_side(side: str | None) -> bool:
+    """Whether an extracted separator side is worth handing to the matcher.
+
+    Three characters clear it outright. A two-letter side is kept only when it
+    is purely alphabetic — the shape of a real team code (TB, SF, KC, NY, LA),
+    which the matcher scores by abbreviation equality alone (#472). The old
+    flat 3-char floor dropped those, so "TB vs DET" reached the matcher with
+    one side and "NY vs LA" fell through to TEAM_ONLY as a single junk team
+    (#821). Two-character sides with digits or punctuation ("F1", "12", "-:")
+    stay rejected.
+    """
+    if not side:
+        return False
+    if len(side) >= 3:
+        return True
+    return len(side) == 2 and side.isascii() and side.isalpha()
 
 
 # One quality token, optionally bracketed: "HD", "1080p", "[1080p]", "(4K)".
@@ -1851,8 +1868,8 @@ def _classify_racing_event(ctx: _ClassifyContext) -> ClassifiedStream | None:
             # UNLESS the left side is itself a racing series name ("NASCAR @
             # Daytona", "F1 at Monaco"): series names are the venue-style
             # naming this step exists to catch. Checked on the raw left text,
-            # not sep_team1: "F1" is under the 3-char extraction minimum and
-            # comes back as None.
+            # not sep_team1: "F1" fails the extraction floor (two chars, not
+            # alphabetic — see _is_substantial_side) and comes back as None.
             left_raw = ctx.text[:sep_position].strip()
             if sep.strip() in ("at", "@") and (
                 (sep_team1 and len(sep_team1.split()) > 1) or has_racing_text_evidence(left_raw)

@@ -416,12 +416,26 @@ class TestOneSidedStreamsAreNotVetoed:
         assert result.failed_reason is not FailedReason.FIXTURE_NOT_IN_LEAGUE
 
 
-# NOTE: the "TB/DET is a valid fixture in BOTH mlb and nhl" property is asserted
-# in tests/matching/test_fixture_corpus.py against the identity index directly.
-# It cannot be driven end-to-end here because `classify_stream` does not parse a
-# bare two/three-letter "TB vs DET" into two sides — it returns TEAM_ONLY with
-# team1="TB vs D". That is pre-existing classifier behaviour, unrelated to this
-# gate, and is tracked separately (bead goax.5).
+class TestBareAbbreviationPairs:
+    """"TB vs DET" is a valid fixture in BOTH mlb and nhl (#821).
+
+    The identity-index property is also asserted directly in
+    tests/matching/test_fixture_corpus.py; this drives it end to end now that
+    the classifier hands the matcher both two/three-letter sides.
+    """
+
+    @pytest.mark.parametrize("stream", ["TB vs DET", "MLB 05: TB vs DET", "TB @ DET"])
+    def test_matches_mlb_game(self, db_factory, stream):
+        result = _match(stream, TB_DET, "mlb", db_factory)
+        assert result.category == ResultCategory.MATCHED
+
+    def test_matches_nhl_game(self, db_factory):
+        result = _match("TB vs DET", NHL_GAME, "nhl", db_factory)
+        assert result.category == ResultCategory.MATCHED
+
+    def test_does_not_match_other_fixture(self, db_factory):
+        result = _match("TB vs DET", COL_WSH, "mlb", db_factory)
+        assert result.category == ResultCategory.FAILED
 
 
 class TestMascotlessLeaguesDoNotShadowMascotedOnes:
