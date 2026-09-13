@@ -1942,8 +1942,9 @@ class TeamMatcher:
     def _leading_pipe_segment(name: str) -> str:
         """The text before the first "|", if it is substantial enough to be a team.
 
-        Minimum 3 chars matches extract_teams_from_separator's own floor — even
-        the shortest real abbreviations (USC, LSU, BYU) clear it.
+        Minimum 3 chars: a pipe head this short is a channel tag, not a team.
+        (extract_teams_from_separator also admits two-letter alphabetic codes
+        like "TB" since #821, but a pipe head is not a separator side.)
         """
         head = name.split("|")[0].strip()
         return head if len(head) >= 3 else name
