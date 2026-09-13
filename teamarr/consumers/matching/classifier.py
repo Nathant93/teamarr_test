@@ -1759,10 +1759,17 @@ def _resolve_hints(
     if custom_regex and custom_regex.league_enabled:
         custom_league = extract_league_with_custom_regex(stream_name, custom_regex)
         if custom_league:
-            league_hint = custom_league
+            # The capture is provider text, often a display name ("Serie A")
+            # that no subscription contains — resolve it to league code(s)
+            # (#820). Unresolvable text is kept so the filter still names it.
+            resolved = DetectionKeywordService.resolve_league_name(custom_league)
+            league_hint = resolved or custom_league
+            if isinstance(league_hint, list) and len(league_hint) > 1:
+                league_hint = _narrow_by_gender(league_hint, stream_name)
             logger.debug(
-                "[CLASSIFY] Custom league regex extracted: %s from '%s'",
+                "[CLASSIFY] Custom league regex extracted: %s → %s from '%s'",
                 custom_league,
+                league_hint,
                 stream_name[:50],
             )
 
