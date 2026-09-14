@@ -90,7 +90,11 @@ CREATE TABLE IF NOT EXISTS templates (
 
     -- Event Template Specific (for event-based EPG)
     event_channel_name TEXT,
-    event_channel_logo_url TEXT
+    team_channel_name TEXT,
+    event_channel_logo_url TEXT,
+
+    -- Team Template Specific (for persistent managed team channels)
+    team_channel_logo_url TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_templates_name ON templates(name);
@@ -136,6 +140,8 @@ CREATE TABLE IF NOT EXISTS teams (
 
     -- Status
     active BOOLEAN DEFAULT 1,
+    managed_channel_enabled BOOLEAN NOT NULL DEFAULT 0,
+    managed_channel_number INTEGER,
 
     -- One entry per team per league (ESPN reuses IDs across leagues for different teams)
     UNIQUE(provider, provider_team_id, sport, primary_league),
@@ -146,6 +152,60 @@ CREATE INDEX IF NOT EXISTS idx_teams_channel_id ON teams(channel_id);
 CREATE INDEX IF NOT EXISTS idx_teams_active ON teams(active);
 CREATE INDEX IF NOT EXISTS idx_teams_provider ON teams(provider);
 CREATE INDEX IF NOT EXISTS idx_teams_sport ON teams(sport);
+
+-- Persistent Dispatcharr ownership records for opt-in Team EPG channels.
+-- ``teams.channel_id`` stays the XMLTV identity; this table is the sole
+-- authority for Teamarr ownership and must never be inferred from a tvg_id.
+CREATE TABLE IF NOT EXISTS managed_team_channels (
+    team_id INTEGER PRIMARY KEY,
+    dispatcharr_channel_id INTEGER,
+    dispatcharr_uuid TEXT,
+    channel_number INTEGER NOT NULL,
+    sync_status TEXT NOT NULL DEFAULT 'pending',
+    sync_message TEXT,
+    last_verified_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_managed_team_channels_dispatcharr
+    ON managed_team_channels(dispatcharr_channel_id);
+
+-- Temporary stream memberships for durable managed team channels. These stay
+-- separate from managed_channel_streams, whose foreign key and lifecycle are
+-- specific to event-expiring channels.
+CREATE TABLE IF NOT EXISTS managed_team_channel_streams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id INTEGER NOT NULL,
+    dispatcharr_stream_id INTEGER NOT NULL,
+    event_id TEXT NOT NULL,
+    event_provider TEXT NOT NULL,
+    source_group_id INTEGER NOT NULL,
+    stream_name TEXT,
+    m3u_account_name TEXT,
+    match_method TEXT,
+    match_type TEXT NOT NULL DEFAULT 'event',
+    feed_team_id TEXT,
+    feed_side TEXT,
+    dispatcharr_channel_group TEXT,
+    priority INTEGER NOT NULL DEFAULT 999,
+    event_start TIMESTAMP,                    -- UTC; the soonest game wins the channel (#826)
+    attach_at TIMESTAMP,
+    detach_at TIMESTAMP,
+    removed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (team_id) REFERENCES managed_team_channels(team_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_team_stream_identity
+    ON managed_team_channel_streams(
+        team_id, dispatcharr_stream_id, event_id, event_provider, source_group_id,
+        attach_at
+    );
+CREATE INDEX IF NOT EXISTS idx_managed_team_streams_active
+    ON managed_team_channel_streams(team_id, removed_at, attach_at, detach_at);
 
 CREATE TRIGGER IF NOT EXISTS update_teams_timestamp
 AFTER UPDATE ON teams
@@ -276,6 +336,9 @@ CREATE TABLE IF NOT EXISTS settings (
     include_final_events BOOLEAN DEFAULT 0,      -- Include completed events for today
     channel_range_start INTEGER DEFAULT 101,     -- First auto-assigned channel number
     channel_range_end INTEGER,                   -- Last auto-assigned channel (null = no limit)
+    managed_team_channel_range_start INTEGER DEFAULT 9000,
+    managed_team_channel_range_end INTEGER,
+    managed_team_channel_priority_ids JSON DEFAULT '[]',
 
     -- Default Team Filtering (for Event Groups)
     default_include_teams JSON,                  -- Global include filter [{"provider":"espn","team_id":"33","league":"nfl"}, ...]
@@ -323,6 +386,8 @@ CREATE TABLE IF NOT EXISTS settings (
     default_stream_profile_id INTEGER,        -- Default stream profile for event channels
     default_channel_group_id INTEGER,         -- Default channel group for event channels
     default_channel_group_mode TEXT DEFAULT 'static', -- 'static', 'sport', 'league', or custom pattern
+    managed_team_channel_profile_ids JSON,    -- Dedicated channel profiles for managed team channels
+    managed_team_channel_group_id INTEGER,    -- Dedicated channel group for managed team channels
     cleanup_unused_logos BOOLEAN DEFAULT 0,   -- Call Dispatcharr's cleanup API after generation
 
     -- Reconciliation Settings
@@ -483,7 +548,7 @@ CREATE TABLE IF NOT EXISTS settings (
     channelsdvr_servers JSON,
 
     -- Schema Version
-    schema_version INTEGER DEFAULT 94
+    schema_version INTEGER DEFAULT 95
 );
 
 -- Scoped stream-ordering rulesets. Runtime resolution intentionally remains

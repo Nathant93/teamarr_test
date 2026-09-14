@@ -340,6 +340,16 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         _advance_version(conn, 94, "scoped stream-ordering rulesets")
         current_version = 94
 
+    if current_version < 95:
+        # Managed team channels (#810). Tables and columns come from schema
+        # reconciliation; the only data transform seeds the team-template
+        # channel name/logo defaults on existing team templates.
+        _apply_migration(
+            conn, 95, "managed team channels: seed template channel name/logo defaults",
+            _migrate_v95_team_channel_defaults,
+        )
+        current_version = 95
+
 
 # =============================================================================
 # Migration helpers
@@ -2560,3 +2570,24 @@ def _migrate_v92_retire_tsdb_tier(conn: sqlite3.Connection) -> None:
         "UPDATE leagues SET tsdb_tier = NULL WHERE tsdb_tier IS NOT NULL"
     ).rowcount
     logger.info("[MIGRATE] v92: cleared tsdb_tier on %d league row(s)", cleared)
+
+
+def _migrate_v95_team_channel_defaults(conn: sqlite3.Connection) -> None:
+    """Seed the managed-channel name/logo defaults on existing team templates.
+
+    Custom values are never touched (only NULL is filled). PRAGMA-guarded so
+    tests that call ``_run_migrations`` on a bare schema still pass.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(templates)").fetchall()}
+    if {"template_type", "team_channel_logo_url"} <= columns:
+        conn.execute(
+            """UPDATE templates SET team_channel_logo_url = ?
+               WHERE template_type = 'team' AND team_channel_logo_url IS NULL""",
+            ("{league_id}/{team_name|pascal}/logo.png?style=1&logo=true&fallback=true",),
+        )
+    if {"template_type", "team_channel_name"} <= columns:
+        conn.execute(
+            """UPDATE templates SET team_channel_name = ?
+               WHERE template_type = 'team' AND team_channel_name IS NULL""",
+            ("{league} | {team_name}",),
+        )

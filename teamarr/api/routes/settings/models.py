@@ -106,10 +106,15 @@ class DispatcharrSettingsModel(BaseModel):
     default_channel_group_id: int | None = None
     # Channel group mode: 'static', 'sport', 'league', or custom pattern
     default_channel_group_mode: str | None = None
+    # Dedicated output defaults for managed Team EPG channels.
+    managed_team_channel_profile_ids: list[str | int] | None = None
+    managed_team_channel_group_id: int | None = None
     # Clean up ALL unused logos in Dispatcharr after generation
     cleanup_unused_logos: bool = False
 
-    @field_validator("default_channel_profile_ids", mode="before")
+    @field_validator(
+        "default_channel_profile_ids", "managed_team_channel_profile_ids", mode="before"
+    )
     @classmethod
     def validate_profile_ids(cls, v: Any) -> list[str | int] | None:
         return _validate_profile_ids(v)
@@ -127,9 +132,13 @@ class DispatcharrSettingsUpdate(BaseModel):
     default_stream_profile_id: int | None = None
     default_channel_group_id: int | None = None
     default_channel_group_mode: str | None = None
+    managed_team_channel_profile_ids: list[str | int] | None = None
+    managed_team_channel_group_id: int | None = None
     cleanup_unused_logos: bool | None = None
 
-    @field_validator("default_channel_profile_ids", mode="before")
+    @field_validator(
+        "default_channel_profile_ids", "managed_team_channel_profile_ids", mode="before"
+    )
     @classmethod
     def validate_profile_ids(cls, v: Any) -> list[str | int] | None:
         return _validate_profile_ids(v)
@@ -354,6 +363,27 @@ class ChannelNumberingSettingsUpdate(BaseModel):
     channel_gap_size: int | None = None
     channel_daily_reset_enabled: bool | None = None
     channel_daily_reset_time: str | None = None
+
+
+# =============================================================================
+# MANAGED TEAM CHANNEL SETTINGS
+# =============================================================================
+
+
+class ManagedTeamChannelSettingsModel(BaseModel):
+    """Dedicated numbering settings for persistent Team EPG channels."""
+
+    range_start: int = 9000
+    range_end: int | None = None
+    priority_ids: list[int] = []
+
+
+class ManagedTeamChannelSettingsUpdate(BaseModel):
+    """Partial update model for managed Team EPG channel settings."""
+
+    range_start: int | None = None
+    range_end: int | None = None
+    priority_ids: list[int] | None = None
 
 
 # =============================================================================

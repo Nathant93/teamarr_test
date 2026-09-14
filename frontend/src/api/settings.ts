@@ -16,6 +16,9 @@ export interface DispatcharrSettings {
   default_channel_group_id: number | null
   // Channel group mode: 'static', 'sport', 'league', or custom pattern
   default_channel_group_mode: string | null
+  // Dedicated output defaults for managed Team EPG channels.
+  managed_team_channel_profile_ids: (number | string)[] | null
+  managed_team_channel_group_id: number | null
   // Clean up ALL unused logos in Dispatcharr after generation
   cleanup_unused_logos: boolean
 }
@@ -28,6 +31,14 @@ export interface LifecycleSettings {
   channel_range_start: number
   channel_range_end: number | null
 }
+
+export interface ManagedTeamChannelSettings {
+  range_start: number
+  range_end: number | null
+  priority_ids: number[]
+}
+
+export type ManagedTeamChannelSettingsUpdate = Partial<ManagedTeamChannelSettings>
 
 export interface SchedulerSettings {
   enabled: boolean
@@ -107,6 +118,16 @@ export interface TSDBKeyValidationResult {
 
 export async function validateTSDBKey(apiKey: string): Promise<TSDBKeyValidationResult> {
   return api.post("/settings/tsdb/validate-key", { api_key: apiKey })
+}
+
+export async function getManagedTeamChannelSettings(): Promise<ManagedTeamChannelSettings> {
+  return api.get("/settings/managed-team-channels")
+}
+
+export async function updateManagedTeamChannelSettings(
+  data: ManagedTeamChannelSettingsUpdate,
+): Promise<ManagedTeamChannelSettings> {
+  return api.put("/settings/managed-team-channels", data)
 }
 
 export interface TeamFilterEntry {

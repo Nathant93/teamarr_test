@@ -19,7 +19,7 @@ from teamarr.dispatcharr.factory import DispatcharrConnection
 from teamarr.dispatcharr.managers import ChannelManager
 from teamarr.emby.client import EmbyClient
 from teamarr.jellyfin.client import JellyfinClient
-from teamarr.services import create_default_service
+from teamarr.services import TeamChannelManager, create_default_service
 from teamarr.services.sports_data import flush_shared_cache
 from teamarr.utilities import call_metrics
 from teamarr.utilities.xmltv import merge_xmltv_content
@@ -74,6 +74,8 @@ class GenerationResult:
     stream_ordering: dict = field(default_factory=dict)
     epg_refresh: dict = field(default_factory=dict)
     epg_association: dict = field(default_factory=dict)
+    managed_team_channels: dict = field(default_factory=dict)
+    managed_team_streams: dict = field(default_factory=dict)
     deletions: dict = field(default_factory=dict)
     reconciliation: dict = field(default_factory=dict)
     cleanup: dict = field(default_factory=dict)
@@ -313,6 +315,20 @@ def run_full_generation(
         result.teams_programmes = team_result.total_programmes
         timer.mark("teams")
 
+        # Persistent Team EPG channels are owned exclusively through
+        # managed_team_channels. Reconcile them after the XMLTV guide is written.
+        team_channels = (
+            dispatcharr_client
+            if isinstance(dispatcharr_client, DispatcharrConnection)
+            else None
+        )
+        team_channel_manager = TeamChannelManager(
+            db_factory,
+            team_channels.channels if team_channels else None,
+            team_channels.epg if team_channels else None,
+            team_channels.logos if team_channels else None,
+        )
+
         # Transition message - teams done, starting groups
         logger.info("[GENERATION] Sending transition message: teams -> groups")
         update_progress(
@@ -366,6 +382,15 @@ def run_full_generation(
                 db_factory, external_occupied
             )
 
+        team_matched_streams: list[dict] = []
+        # Groups whose matching finished this run. Only their memberships are
+        # reconciled; a group that errored says nothing about its streams (#826).
+        team_completed_groups: set[int] = set()
+
+        def collect_team_matches(group_id: int, matches: list[dict]) -> None:
+            team_completed_groups.add(group_id)
+            team_matched_streams.extend({**match, "source_group_id": group_id} for match in matches)
+
         group_result = process_all_event_groups(
             db_factory=db_factory,
             dispatcharr_client=dispatcharr_client,
@@ -377,6 +402,7 @@ def run_full_generation(
             # whole guide a second time for a value nothing reads.
             aggregate_xmltv=False,
             run_id=stats_run.id,  # Details + per-group breakdown key on this run (#645)
+            matched_stream_callback=collect_team_matches,
         )
         result.groups_processed = group_result.groups_processed
         result.groups_programmes = group_result.total_programmes
@@ -385,11 +411,26 @@ def run_full_generation(
 
         # Step 3b: Global channel reassignment (if enabled)
         check_cancelled()
-        _sync_global_channels(
+        relayout = _sync_global_channels(
             db_factory, dispatcharr_client, update_progress,
             external_occupied=external_occupied,
         )
         timer.mark("channel_reassign")
+
+        # Step 3a: Reconcile persistent Team EPG channels and their stream
+        # memberships. Runs before ordering so the ordering pass pushes this
+        # run's memberships, not last run's. Guarded like every other step:
+        # a failure here must not stop event channels being created/deleted.
+        check_cancelled()
+        try:
+            result.managed_team_channels = team_channel_manager.sync(relayout=relayout)
+            result.managed_team_streams = team_channel_manager.sync_stream_memberships(
+                team_matched_streams, completed_group_ids=team_completed_groups
+            )
+        except Exception as e:  # noqa: BLE001 - per-step isolation
+            logger.exception("[GENERATION] Managed team channel sync failed: %s", e)
+            result.managed_team_channels = {"error": str(e)}
+        timer.mark("team_channels")
 
         # Step 3b: Apply stream ordering rules to all channels (93-95%)
         check_cancelled()
@@ -465,6 +506,12 @@ def run_full_generation(
             result.epg_association = lifecycle_service.associate_epg_with_channels(
                 dispatcharr_settings.epg_id
             )
+            try:
+                result.epg_association["managed_team_channels"] = (
+                    team_channel_manager.associate_epg(dispatcharr_settings.epg_id)
+                )
+            except Exception as e:  # noqa: BLE001 - per-step isolation
+                logger.exception("[GENERATION] Managed team EPG association failed: %s", e)
         timer.mark("dispatcharr_epg_refresh")
 
         # Capture the configured guide refreshes now, then run them after the
@@ -1073,13 +1120,16 @@ def _sync_global_channels(
     dispatcharr_client: Any | None,
     update_progress: Callable,
     external_occupied: set[int] | None = None,
-) -> None:
+) -> bool:
     """Reassign channel numbers globally by sort priority.
 
     This is the single authoritative pass that pushes numbers to Dispatcharr.
     In sticky (gap/strict) modes it places only new channels, unless the daily
     reset window has arrived (should_run_channel_reset) — then it re-grids
     everything once.
+
+    Returns whether that full re-layout ran, so the managed team channel sync
+    can re-sort its own numbers in the same run (#810).
     """
     from teamarr.database.channel_numbers import (
         reassign_all_channels,
@@ -1095,7 +1145,7 @@ def _sync_global_channels(
             conn, external_occupied=external_occupied, force_reset=force_reset
         )
         if global_result["channels_moved"] == 0:
-            return
+            return force_reset
 
         logger.info(
             "[GENERATION] Global reassignment: %d channels processed, %d moved",
@@ -1104,7 +1154,7 @@ def _sync_global_channels(
         )
 
         if not dispatcharr_client:
-            return
+            return force_reset
 
         synced = 0
         for ch in global_result.get("drift_details", []):
@@ -1124,6 +1174,7 @@ def _sync_global_channels(
                     )
         if synced:
             logger.info("[GENERATION] Synced %d channel numbers to Dispatcharr", synced)
+        return force_reset
 
 
 @dataclass
@@ -1520,6 +1571,16 @@ def _apply_stream_ordering(
                     order_drifted,
                 )
                 pushes.append((plan, ordered_ids))
+
+        # Team channels are durable and use their own membership table, but
+        # their streams obey the same scoped ordering rules and windows. This
+        # opens its own connection and issues its own PATCHes, so it runs only
+        # once the block above has committed and closed (#735, #826).
+        team_ordering = TeamChannelManager(db_factory, channel_mgr).sync_stream_ordering()
+        reorder_result["managed_team_channels_reordered"] = team_ordering["channels"]
+        reorder_result["managed_team_streams_reordered"] = team_ordering["streams"]
+        if team_ordering["errors"]:
+            reorder_result["managed_team_order_errors"] = team_ordering["errors"]
 
         # Phase 3 (parallel, network only): issue the pushes. Outside the `with`
         # so the database connection is closed before any thread runs — every
