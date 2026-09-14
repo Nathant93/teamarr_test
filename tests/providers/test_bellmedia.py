@@ -1,4 +1,4 @@
-"""Bell Media CFL provider normalization and routing tests."""
+"""Bell Media provider normalization and routing tests."""
 
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
@@ -117,6 +117,14 @@ def test_event_parsing_uses_top_as_away_and_bottom_as_home():
     assert event.season_type == "regular"
 
 
+def test_event_parsing_canonicalizes_hockey_season_types():
+    provider = _provider()
+
+    assert provider._parse_event(_event(seasonTypeId=0), "ohl", {}).season_type == "preseason"
+    assert provider._parse_event(_event(seasonTypeId=1), "ohl", {}).season_type == "regular"
+    assert provider._parse_event(_event(seasonTypeId=2), "ohl", {}).season_type == "postseason"
+
+
 def test_scheduled_event_hides_scores():
     event = _provider([_event(status="Scheduled")]).get_event("13419712", "cfl")
 
@@ -212,4 +220,31 @@ def test_client_uses_bellmedia_origin():
     assert str(requests[0].url).startswith(
         "https://next-gen.sports.bellmedia.ca/v2/competitor/football/cfl"
     )
+    client.close()
+
+
+def test_client_reads_hockey_daily_calendar_groups(monkeypatch):
+    client = BellMediaClient()
+    groups = []
+    monkeypatch.setattr(
+        client,
+        "get_calendar",
+        lambda league: {
+            "season": 2026,
+            "monthlyCalendar": {
+                "2026-09": {"calendarDates": ["2026-09-12", "2026-09-13", "2026-09-14"]}
+            },
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "get_schedule_group",
+        lambda league, grouping, season: groups.append(grouping)
+        or [{"eventId": grouping}, {"eventId": grouping}],
+    )
+
+    events = client.get_events_between("ohl", date(2026, 9, 13), date(2026, 9, 14))
+
+    assert groups == ["2026-09-13", "2026-09-14"]
+    assert [event["eventId"] for event in events] == ["2026-09-13", "2026-09-14"]
     client.close()

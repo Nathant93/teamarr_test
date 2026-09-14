@@ -68,6 +68,25 @@ def test_schema_seeds_gohl_hockeytech_mapping(db_conn):
     )
 
 
+@pytest.mark.parametrize(
+    ("league_code", "provider_league_id"),
+    (
+        ("chl", "chl"),
+        ("ohl", "ohl"),
+        ("whl", "whl"),
+        ("qmjhl", "lhjmq"),
+        ("ahl", "ahl"),
+        ("pwhl", "pwhl"),
+    ),
+)
+def test_schema_seeds_bellmedia_hockey_mappings(db_conn, league_code, provider_league_id):
+    row = db_conn.execute(
+        "SELECT provider, provider_league_id FROM leagues WHERE league_code = ?", (league_code,)
+    ).fetchone()
+
+    assert tuple(row) == ("bellmedia", provider_league_id)
+
+
 # ---------------------------------------------------------------------------
 # Broadcaster parsing (#752)
 #

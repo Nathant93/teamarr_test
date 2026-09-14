@@ -413,7 +413,8 @@ Season type indicators. All providers normalize their native season codes to a c
 |----------|-------------------|
 | ESPN | Full — derived from season slug (`post-season`, `semifinals`, etc.) with numeric-type fallback |
 | MLB Stats | Full — `gameType` codes (`F`/`D`/`L`/`W`/`P` → postseason, `S`/`E` → preseason) |
-| HockeyTech | Full — via per-season `playoff` flag (CHL, AHL, PWHL, USHL) |
+| Bell Media | Full — via `seasonTypeId` (CHL, OHL, WHL, QMJHL, AHL, PWHL) |
+| HockeyTech | Full — via per-season `playoff` flag (ECHL, USHL, Junior A) |
 | TSDB | Partial — postseason detected via special `intRound` codes (125/150/160/170/180/200) used by some leagues (NBA, NHL, IPL, European knockouts). Leagues that keep normal round numbering through finals (AFL, NRL, boxing) can't be detected and return empty. Preseason is never detected for TSDB. |
 
 ---

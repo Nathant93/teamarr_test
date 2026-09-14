@@ -10,7 +10,7 @@ nav_order: 1
 
 ## What is Teamarr?
 
-Teamarr is an add-on for [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) that generates enriched EPG for sports channels. It pulls rich sports data from providers (ESPN, TheSportsDB, HockeyTech, MLB Stats, NASCAR, Squiggle, and more) — schedules, venues, records, scores, standings, broadcasts — and uses it to manage your IPTV sports channels in Dispatcharr.
+Teamarr is an add-on for [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) that generates enriched EPG for sports channels. It pulls rich sports data from providers (ESPN, Bell Media, TheSportsDB, HockeyTech, MLB Stats, NASCAR, Squiggle, and more) — schedules, venues, records, scores, standings, broadcasts — and uses it to manage your IPTV sports channels in Dispatcharr.
 
 The workflow is simple: point Teamarr at your IPTV stream groups, tell it which leagues you follow, and it matches streams to real sporting events, creates and manages channels in Dispatcharr, and generates the guide. It works with several kinds of stream source:
 

@@ -4,6 +4,8 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 
 from teamarr.core import (
+    SEASON_POSTSEASON,
+    SEASON_PRESEASON,
     SEASON_REGULAR,
     Event,
     EventStatus,
@@ -141,6 +143,16 @@ class BellMediaProvider(SportsProvider):
                 return None
             status = self._parse_status(payload)
             broadcasts = self._broadcasts(payload)
+            season_type_id = row.get("seasonTypeId")
+            season_type = (
+                {
+                    0: SEASON_PRESEASON,
+                    1: SEASON_REGULAR,
+                    2: SEASON_POSTSEASON,
+                }.get(season_type_id)
+                if isinstance(season_type_id, int)
+                else None
+            )
             return Event(
                 id=str(event_id),
                 provider=self.name,
@@ -157,7 +169,7 @@ class BellMediaProvider(SportsProvider):
                 venue=Venue(name=payload["venue"]) if payload.get("venue") else None,
                 broadcasts=broadcasts,
                 season_year=row.get("season"),
-                season_type=SEASON_REGULAR if row.get("seasonTypeId") == 1 else None,
+                season_type=season_type,
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("[BELLMEDIA] Failed to parse event: %s", exc)

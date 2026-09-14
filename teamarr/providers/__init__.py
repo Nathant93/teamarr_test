@@ -188,7 +188,7 @@ ProviderRegistry.register(
     name="hockeytech",
     provider_class=HockeyTechProvider,
     factory=_create_hockeytech_provider,
-    priority=50,  # CHL leagues (OHL, WHL, QMJHL) + AHL, PWHL, USHL
+    priority=50,  # ECHL, USHL, and Canadian Junior A leagues
     enabled=True,
 )
 

@@ -236,7 +236,7 @@ Documentation epic: `bd list --parent teamarr-nv4`
 | Version | `pyproject.toml` line 7 |
 | Dependencies | `pyproject.toml` (ranges) + `uv.lock` (pinned, used by the Docker build) — run `uv lock` after any dependency change or `--frozen` builds fail |
 | League configs | `teamarr/database/schema.sql` |
-| Schema version | `teamarr/database/schema.sql` (v95) |
+| Schema version | `teamarr/database/schema.sql` (v96) |
 | Schema reconciliation | `teamarr/database/reconciliation.py` |
 | Provider registration | `teamarr/providers/__init__.py` |
 
@@ -251,11 +251,11 @@ Provider Layer   → teamarr/providers/ (espn, bellmedia, squiggle, nascar, mlbs
 
 **Providers** (lower priority = tried first):
 - ESPN (0) - Primary, most leagues
-- Bell Media (20) - CFL; TSN public sports widget API, no key
+- Bell Media (20) - CFL, CHL, OHL, WHL, QMJHL, AHL, PWHL; TSN public sports widget API, no key
 - Squiggle (30) - AFL (Australian Football League); free, no key required
 - NASCAR (35) - NASCAR Cup/O'Reilly (Xfinity)/Trucks; official cf.nascar.com schedule API, full weekend sessions, no key
 - MLB Stats (40) - MiLB (Triple-A through Rookie)
-- HockeyTech (50) - CHL, AHL, PWHL, USHL
+- HockeyTech (50) - ECHL, USHL, Canadian Junior A
 - Supabase (55) - Supabase-backed leagues (CBL, etc.)
 - TSDB (100) - Cricket, rugby, boxing, Scandinavian leagues, uru.2 — premium key required (#676); keyless = provider not registered
 
