@@ -142,9 +142,10 @@ export const DEFAULT_FORM: TemplateCreate = {
   pregame_conditional_rows: [],
   postgame_conditional_rows: seedPostgameRows(false),
   idle_conditional_rows: [],
-  // No-schedule register seeded enabled (#418): with it off, idle content
+  // Offseason register seeded enabled (#418): with it off, idle content
   // renders {*.next} literals once a team has no next scheduled game.
-  // Each enabled field replaces its normal idle counterpart independently.
+  // description_enabled is the master toggle; title unset falls back to the
+  // idle title (no .next in it).
   idle_offseason: { title_enabled: false, title: null, subtitle_enabled: true, subtitle: "No upcoming game currently on schedule", description_enabled: true, description: "No upcoming {team_name} games scheduled." },
   conditional_descriptions: [],
   event_channel_name: "{matchup}",
