@@ -78,7 +78,13 @@ Point the running app at a **throwaway Dispatcharr** while developing. Teamarr's
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [GNU Affero General Public License v3.0 or later](LICENSE), the same license as the project.
+By submitting a pull request, you confirm that you have the right to submit the contribution and license it under the GNU Affero General Public License v3.0 only.
+
+If your employer or another party owns the contribution, obtain its authorization before submitting it.
+
+Contributions must not include code, assets, or data whose license is incompatible with AGPL-3.0-only. Preserve all required third-party notices and identify their source and license in the pull request.
+
+Submitting a pull request grants Teamarr and its maintainers a perpetual, worldwide, non-exclusive, royalty-free, irrevocable license to use, modify, distribute, sublicense, and relicense the contribution as part of Teamarr under any [OSI-approved open-source license](https://opensource.org/licenses). This permission does not transfer copyright ownership.
 
 ## Attribution
 
