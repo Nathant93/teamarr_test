@@ -200,7 +200,10 @@ class XmltvRenderer:
                     conn, getattr(event, "league", None), exception_keywords
                 )
                 keyword_label, _ = check_exception_keyword(
-                    stream_name, keywords, event_identity_text(event)
+                    stream_name,
+                    keywords,
+                    event_identity_text(event),
+                    match.get("epg_program_title"),
                 )
                 if keyword_label:
                     match["_exception_keyword"] = keyword_label

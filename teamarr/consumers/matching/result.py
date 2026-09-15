@@ -235,6 +235,10 @@ class MatchOutcome:
     # window for time-shared linear streams. None for non-EPG matches.
     epg_program_start: "datetime | None" = None
     epg_program_end: "datetime | None" = None
+    # The matched programme's cleaned title|sub_title (#829) — exception
+    # keywords are checked against it, since a linear stream's own name
+    # ("ESPN 2") never carries the feed evidence.
+    epg_program_title: str | None = None
 
     # Common fields
     stream_name: str | None = None

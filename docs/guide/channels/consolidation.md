@@ -27,7 +27,7 @@ Exception keywords let certain streams break out of the default behavior — use
 Each keyword has:
 
 - **Label** — the display name. It's appended to the variant channel's name, resolves the `{exception_keyword}` template variable, and is part of the channel's tvg-id.
-- **Match Terms** — comma-separated terms matched against stream names.
+- **Match Terms** — comma-separated terms matched against stream names. For a stream matched through its EPG guide (e.g. a linear `ESPN 2` feed), the matched programme's title and subtitle are checked too, so a *ManningCast* keyword with the term `Peyton and Eli` catches `Monday Night Football with Peyton and Eli` even though the stream is only named `ESPN 2`. The stream name is checked first.
 - **Behavior** — one of three:
 
 | Behavior | Description |
@@ -45,7 +45,7 @@ A keyword never fires on a word the event itself is named with: the *Spanish* ke
 
 The Exception Keywords card is only *shown* in Consolidate mode, but stored keywords are checked on every run regardless of mode — a keyword's behavior overrides the global mode per-stream (an **Ignore** keyword drops its streams even in Separate mode).
 
-Keyword placement is **enforced every generation**: if a stream should move between a main channel and its keyword variant (because keywords or stream names changed), it's moved, and the main channel is always kept on the lower channel number than its variants.
+Keyword placement is **enforced every generation**: if a stream should move between a main channel and its keyword variant (because keywords, stream names, or a matched programme's title changed), it's moved, and the main channel is always kept on the lower channel number than its variants.
 
 ## Race Feeds
 
