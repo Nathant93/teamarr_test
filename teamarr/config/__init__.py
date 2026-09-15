@@ -42,6 +42,7 @@ def _get_base_version() -> str:
 
 
 BASE_VERSION = _get_base_version()
+SOURCE_REPOSITORY = "https://github.com/Pharaoh-Labs/teamarr"
 
 
 def _get_version() -> str:
@@ -119,6 +120,18 @@ def _get_version() -> str:
 
 
 VERSION = _get_version()
+
+
+def get_source_url() -> str:
+    """Return the source location for the version currently running."""
+    if source_url := os.environ.get("TEAMARR_SOURCE_URL"):
+        return source_url
+
+    sha = os.environ.get("GIT_SHA")
+    if sha and sha != "unknown":
+        return f"{SOURCE_REPOSITORY}/tree/{sha}"
+
+    return SOURCE_REPOSITORY
 
 # Load .env file from project root
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
