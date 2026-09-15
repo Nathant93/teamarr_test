@@ -57,3 +57,7 @@ EPG:     Kansas City Chiefs @ Philadelphia Eagles
 
 - [User Guide](guide/) — get started with Teamarr
 - [Technical Reference](reference/) — architecture and API documentation
+
+## License
+
+Teamarr is free software under the [GNU Affero General Public License v3.0 or later](https://github.com/Pharaoh-Labs/teamarr/blob/main/LICENSE). Releases before v2.18.0 were MIT.

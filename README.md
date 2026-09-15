@@ -37,4 +37,8 @@ docker compose up -d
 
 ## License
 
-MIT
+Teamarr is free software licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later).
+
+Copyright (C) 2025-2026 Pharaoh Labs and Teamarr contributors.
+
+If you run a modified Teamarr for other people over a network, the AGPL requires you to offer them the corresponding source. Releases before v2.18.0 were published under the MIT License.
