@@ -752,6 +752,7 @@ def process_team(
 def process_all_teams(
     db_factory: Any,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    service: SportsDataService | None = None,
 ) -> BatchTeamResult:
     """Process all active teams.
 
@@ -760,9 +761,13 @@ def process_all_teams(
     Args:
         db_factory: Factory function returning database connection
         progress_callback: Optional callback(current, total, team_name)
+        service: Optional SportsDataService to reuse. A full generation run
+            passes its one run-scoped service so team processing shares the
+            same warm event cache as group processing and lifecycle; omitting
+            it builds a processor-local service with a cold cache.
 
     Returns:
         BatchTeamResult
     """
-    processor = TeamProcessor(db_factory=db_factory)
+    processor = TeamProcessor(db_factory=db_factory, service=service)
     return processor.process_all_teams(progress_callback=progress_callback)
