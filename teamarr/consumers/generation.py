@@ -310,7 +310,13 @@ def run_full_generation(
                 msg = f"{name} ({current}/{total}) [{elapsed:.1f}s]"
             update_progress("teams", pct, msg, current, total, name)
 
-        team_result = process_all_teams(db_factory=db_factory, progress_callback=team_progress)
+        # Reuse the run-scoped service so teams share the warm event cache with
+        # group processing and lifecycle, instead of building a cold one here.
+        team_result = process_all_teams(
+            db_factory=db_factory,
+            progress_callback=team_progress,
+            service=shared_service,
+        )
         result.teams_processed = team_result.teams_processed
         result.teams_programmes = team_result.total_programmes
         timer.mark("teams")
