@@ -408,6 +408,25 @@ export function MainLayout() {
               {isExportingSupport ? "Preparing support bundle" : "Support bundle"}
             </button>
           </div>
+          <div className="mt-1 text-center text-xs text-muted-foreground">
+            <a
+              href="https://github.com/Pharaoh-Labs/teamarr"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground underline-offset-2 hover:underline"
+            >
+              Source code
+            </a>
+            {" · "}
+            <a
+              href="https://github.com/Pharaoh-Labs/teamarr/blob/main/LICENSE"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground underline-offset-2 hover:underline"
+            >
+              AGPL-3.0-or-later
+            </a>
+          </div>
           <div className="mt-1 text-center text-xs italic text-muted-foreground">
             Jesse, Teamarr will never support curling 🥌
           </div>
