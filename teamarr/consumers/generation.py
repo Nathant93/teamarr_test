@@ -9,11 +9,20 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from teamarr.channelsdvr.client import ChannelsDVRClient
+from teamarr.consumers.generation_pipeline.models import (
+    CallbackCancellationToken,
+    GenerationCancelled,
+    GenerationResult,
+    GenerationSettingsSnapshot,
+    ProgressCallback,
+    ProgressUpdate,
+    legacy_progress_reporter,
+)
 from teamarr.dispatcharr import EPGManager, M3UManager
 from teamarr.dispatcharr.factory import DispatcharrConnection
 from teamarr.dispatcharr.managers import ChannelManager
@@ -26,9 +35,17 @@ from teamarr.utilities.xmltv import merge_xmltv_content
 
 logger = logging.getLogger(__name__)
 
-
-class GenerationCancelled(Exception):
-    """Raised when a generation run is cancelled by the user."""
+# GenerationCancelled, GenerationResult and ProgressCallback now live in
+# generation_pipeline.models and are re-exported here: this module is the
+# public composition root, and the API, the scheduler, teamarr.consumers and
+# several test modules import them from this path.
+__all__ = [
+    "GenerationCancelled",
+    "GenerationResult",
+    "ProgressCallback",
+    "run_full_generation",
+    "run_stream_ordering_only",
+]
 
 
 # Concurrency for the stream-order push phase (#735). Bounded well under the
@@ -45,58 +62,6 @@ _generation_running = False
 _media_refresh_lock = threading.Lock()
 
 
-@dataclass
-class GenerationResult:
-    """Result of a full EPG generation run."""
-
-    success: bool = True
-    error: str | None = None
-
-    # Timing
-    started_at: float = 0.0
-    completed_at: float = 0.0
-    duration_seconds: float = 0.0
-
-    # EPG stats
-    teams_processed: int = 0
-    teams_programmes: int = 0
-    groups_processed: int = 0
-    groups_programmes: int = 0
-    programmes_total: int = 0
-
-    # File output
-    file_written: bool = False
-    file_path: str | None = None
-    file_size: int = 0
-
-    # Sub-task results
-    m3u_refresh: dict = field(default_factory=dict)
-    stream_ordering: dict = field(default_factory=dict)
-    epg_refresh: dict = field(default_factory=dict)
-    epg_association: dict = field(default_factory=dict)
-    managed_team_channels: dict = field(default_factory=dict)
-    managed_team_streams: dict = field(default_factory=dict)
-    deletions: dict = field(default_factory=dict)
-    reconciliation: dict = field(default_factory=dict)
-    cleanup: dict = field(default_factory=dict)
-    logo_cleanup: dict = field(default_factory=dict)
-    channel_conflicts: dict = field(default_factory=dict)
-    emby_refresh: dict = field(default_factory=dict)
-    jellyfin_refresh: dict = field(default_factory=dict)
-    channelsdvr_refresh: dict = field(default_factory=dict)
-    channelsdvr_epg_refresh: dict = field(default_factory=dict)
-    # One entry per media server refreshed this run (#649): persisted on the
-    # run row so a server that fails every run is visible after the fact.
-    media_server_outcomes: list[dict] = field(default_factory=list)
-
-    # For stats run tracking
-    run_id: int | None = None
-
-    # Wall-clock seconds per generation phase (persisted to run stats so any
-    # two runs — local or live — can be compared phase-by-phase).
-    phase_timings: dict = field(default_factory=dict)
-
-
 class _PhaseTimer:
     """Records elapsed wall time between phase marks."""
 
@@ -108,11 +73,6 @@ class _PhaseTimer:
         now = time.time()
         self._timings[phase] = round(self._timings.get(phase, 0.0) + (now - self._last), 2)
         self._last = now
-
-
-# Type alias for progress callback
-# (phase: str, percent: int, message: str, current: int, total: int, item_name: str) -> None
-ProgressCallback = Callable[[str, int, str, int, int, str], None]
 
 
 def run_full_generation(
@@ -186,6 +146,11 @@ def run_full_generation(
     result = GenerationResult()
     result.started_at = time.time()
 
+    # Structured progress in, the public six-argument callback out. Stage
+    # bodies still call update_progress positionally; Packet 3 onward moves
+    # them onto ProgressUpdate as they are extracted.
+    report_progress = legacy_progress_reporter(progress_callback)
+
     def update_progress(
         phase: str,
         percent: int,
@@ -194,8 +159,16 @@ def run_full_generation(
         total: int = 0,
         item_name: str = "",
     ):
-        if progress_callback:
-            progress_callback(phase, percent, message, current, total, item_name)
+        report_progress(
+            ProgressUpdate(
+                phase=phase,
+                percent=percent,
+                message=message,
+                current=current,
+                total=total,
+                item_name=item_name,
+            )
+        )
 
     # Create stats run for tracking with database-level lock
     # Use BEGIN IMMEDIATE to acquire exclusive write lock BEFORE checking
@@ -250,10 +223,12 @@ def run_full_generation(
     # Import cancellation helpers
     from teamarr.consumers.generation_status import cancel_generation, is_cancellation_requested
 
-    def check_cancelled():
-        """Check if cancellation was requested and raise if so."""
-        if is_cancellation_requested():
-            raise GenerationCancelled("Cancelled by user")
+    # The token only raises. Persisting the cancelled run and calling
+    # cancel_generation() stay with the outer handler below, so no stage can
+    # half-finish a run. The import above runs per call, so patching
+    # generation_status.is_cancellation_requested still controls this.
+    cancellation = CallbackCancellationToken(requested=is_cancellation_requested)
+    check_cancelled = cancellation.checkpoint
 
     try:
         # Increment generation counter ONCE at start of full EPG run
@@ -274,11 +249,18 @@ def run_full_generation(
         # (Previously each consumer created its own service with a cold cache)
         shared_service = create_default_service()
 
-        # Get settings
+        # Get settings. Snapshotted together, in this order, on one connection:
+        # every stage below reads the values this run started with, so a
+        # setting edited mid-run cannot change behavior halfway through.
+        # Deliberately only these three — reconciliation, media-server,
+        # ordering and cleanup settings keep their phase-local reads and their
+        # own failure policies.
         with db_factory() as conn:
-            settings = get_epg_settings(conn)
-            dispatcharr_settings = get_dispatcharr_settings(conn)
-            display_settings = get_display_settings(conn)
+            settings = GenerationSettingsSnapshot(
+                epg=get_epg_settings(conn),
+                dispatcharr=get_dispatcharr_settings(conn),
+                display=get_display_settings(conn),
+            )
 
         timer = _PhaseTimer(result.phase_timings)
 
@@ -457,12 +439,12 @@ def run_full_generation(
             group_xmltv = get_all_group_xmltv(conn)
             xmltv_contents.extend(group_xmltv)
 
-        output_path = settings.epg_output_path
+        output_path = settings.epg.epg_output_path
         if xmltv_contents and output_path:
             merged_xmltv = merge_xmltv_content(
                 xmltv_contents,
-                generator_name=display_settings.xmltv_generator_name,
-                generator_url=display_settings.xmltv_generator_url,
+                generator_name=settings.display.xmltv_generator_name,
+                generator_url=settings.display.xmltv_generator_url,
             )
             output_file = Path(output_path)
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -488,7 +470,7 @@ def run_full_generation(
 
         # Step 5: Dispatcharr EPG refresh + channel association (96-98%)
         check_cancelled()
-        if dispatcharr_client and dispatcharr_settings.epg_id:
+        if dispatcharr_client and settings.dispatcharr.epg_id:
             update_progress("dispatcharr", 96, "Refreshing Dispatcharr EPG...")
 
             raw_client = (
@@ -498,7 +480,7 @@ def run_full_generation(
             )
             epg_manager = EPGManager(raw_client)
             refresh_result = epg_manager.wait_for_refresh(
-                dispatcharr_settings.epg_id,
+                settings.dispatcharr.epg_id,
                 timeout=300,
                 cancellation_check=is_cancellation_requested,
             )
@@ -510,11 +492,11 @@ def run_full_generation(
 
             update_progress("dispatcharr", 97, "Associating EPG with channels...")
             result.epg_association = lifecycle_service.associate_epg_with_channels(
-                dispatcharr_settings.epg_id
+                settings.dispatcharr.epg_id
             )
             try:
                 result.epg_association["managed_team_channels"] = (
-                    team_channel_manager.associate_epg(dispatcharr_settings.epg_id)
+                    team_channel_manager.associate_epg(settings.dispatcharr.epg_id)
                 )
             except Exception as e:  # noqa: BLE001 - per-step isolation
                 logger.exception("[GENERATION] Managed team EPG association failed: %s", e)
