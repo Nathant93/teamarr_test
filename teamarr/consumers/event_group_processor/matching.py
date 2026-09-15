@@ -507,6 +507,9 @@ class StreamMatching:
                             # MatchMethod.EPG matches; None for name matches (full-life).
                             "epg_program_start": result.epg_program_start,
                             "epg_program_end": result.epg_program_end,
+                            # Programme title|sub_title: exception keywords are
+                            # checked against it after the stream name (#829).
+                            "epg_program_title": result.epg_program_title,
                             # The stream's own date/time/tz as the classifier
                             # read them (#245): racing session binding falls
                             # back to the timestamp when the name carries no

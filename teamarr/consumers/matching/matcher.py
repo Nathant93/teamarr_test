@@ -172,6 +172,8 @@ class MatchedStreamResult:
     # (183.5) as the attach/detach window for time-shared linear streams.
     epg_program_start: datetime | None = None
     epg_program_end: datetime | None = None
+    # EPG matches: the programme's title|sub_title, for exception keywords (#829).
+    epg_program_title: str | None = None
 
     # Classification info
     category: StreamCategory | None = None
@@ -1172,6 +1174,7 @@ class StreamMatcher:
                     outcome.match_method = MatchMethod.EPG
                     outcome.epg_program_start = program.start_dt
                     outcome.epg_program_end = program.end_dt
+                    outcome.epg_program_title = epg_input
                     ev_id = outcome.event.id if outcome.event else None
                     prev = best_by_event.get(ev_id)
                     skew_s = (
@@ -1260,6 +1263,8 @@ class StreamMatcher:
                 outcome.match_method = MatchMethod.EPG
                 outcome.epg_program_start = program.start_dt
                 outcome.epg_program_end = program.end_dt
+                # Exception keywords read the programme, not "ESPN 2" (#829).
+                outcome.epg_program_title = epg_input
                 # Diagnostic: program slot vs matched event time. A large skew
                 # (Δ) is the tell-tale of a wrong-occurrence bind (bead t5e) —
                 # the program and the event it matched are hours/days apart.
@@ -2044,6 +2049,7 @@ class StreamMatcher:
             matched_side=outcome.matched_side,
             epg_program_start=outcome.epg_program_start,
             epg_program_end=outcome.epg_program_end,
+            epg_program_title=outcome.epg_program_title,
         )
 
     def _get_dominant_event_type(self) -> str | None:

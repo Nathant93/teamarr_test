@@ -137,8 +137,14 @@ class KeywordEnforcer:
                             league_keywords[league] = get_keywords_for_league(
                                 conn, league, exception_keywords
                             )
+                        # The persisted programme text (#829) keeps an
+                        # EPG-matched stream whose keyword only the guide
+                        # names from being moved back to the main channel.
                         expected_keyword, behavior = check_exception_keyword(
-                            stream_name, league_keywords[league], event_identity_text(channel)
+                            stream_name,
+                            league_keywords[league],
+                            event_identity_text(channel),
+                            stream.epg_program_title,
                         )
 
                         # Normalize: None for no keyword
@@ -221,6 +227,7 @@ class KeywordEnforcer:
                             # ordering rules and its EPG attach window (#344).
                             match_type=stream.match_type,
                             match_method=stream.match_method,
+                            epg_program_title=stream.epg_program_title,
                             feed_team_id=stream.feed_team_id,
                             attach_at=stream.attach_at,
                             detach_at=stream.detach_at,

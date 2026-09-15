@@ -99,6 +99,7 @@ def check_exception_keyword(
     stream_name: str,
     keywords: list[ExceptionKeyword],
     event_text: str | None = None,
+    program_title: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Check if stream name matches any exception keyword.
 
@@ -114,23 +115,35 @@ def check_exception_keyword(
     French Open — while "En Español" / "(ESP)" still fire, since the event
     is not named with them.
 
+    An EPG-matched linear stream (#829) is named for its network ("ESPN 2"),
+    so the feed evidence lives in the guide programme instead: "Monday Night
+    Football with Peyton and Eli | Denver Broncos at Kansas City Chiefs".
+    ``program_title`` is that matched programme's title|sub_title and is
+    searched after the stream name — the stream's own name is the more
+    direct evidence, so a keyword it names wins over one only the guide
+    names. The event-name guard applies to both.
+
     Args:
         stream_name: Stream name to check
         keywords: List of ExceptionKeyword objects
         event_text: The matched event's name/short name/venue country, or None
+        program_title: The matched EPG programme's title|sub_title, or None
 
     Returns:
         Tuple of (label, behavior) or (None, None) if no match.
         The label is the configured display name for the keyword, used for
         channel naming and the {exception_keyword} template variable.
     """
-    stream_lower = stream_name.lower()
     event_lower = event_text.lower() if event_text else ""
-    for kw in keywords:
-        for term in kw.match_term_list:
-            pattern = _make_keyword_pattern(term)
-            if event_lower and re.search(pattern, event_lower):
-                continue
-            if re.search(pattern, stream_lower):
-                return (kw.label, kw.behavior)
+    for text in (stream_name, program_title):
+        if not text:
+            continue
+        text_lower = text.lower()
+        for kw in keywords:
+            for term in kw.match_term_list:
+                pattern = _make_keyword_pattern(term)
+                if event_lower and re.search(pattern, event_lower):
+                    continue
+                if re.search(pattern, text_lower):
+                    return (kw.label, kw.behavior)
     return (None, None)

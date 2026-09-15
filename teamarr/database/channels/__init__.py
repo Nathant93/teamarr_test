@@ -61,6 +61,7 @@ from .streams import (
     update_stream_feed_team,
     update_stream_name,
     update_stream_priority,
+    update_stream_program_title,
     update_stream_window,
 )
 from .types import ManagedChannel, ManagedChannelStream
@@ -99,6 +100,7 @@ __all__ = [
     "update_stream_feed_team",
     "update_stream_name",
     "update_stream_priority",
+    "update_stream_program_title",
     "update_stream_window",
     # History
     "log_channel_history",
