@@ -43,6 +43,7 @@ from .types import (
     FeedSeparationSettings,
     JellyfinSettings,
     LifecycleSettings,
+    ManagedTeamChannelSettings,
     ProxySettings,
     ReconciliationSettings,
     SchedulerSettings,
@@ -382,12 +383,29 @@ GROUPS: dict[str, GroupSpec] = {
                         # not SQL NULL.
                         "dump": json.dumps,
                     },
+                    "managed_team_channel_profile_ids": {
+                        "parse": _parse_profile_ids,
+                        "dump": json.dumps,
+                    },
                     **_URL_HOOK,
                 },
             ),
             "Dispatcharr",
         ),
         GroupSpec("lifecycle", LifecycleSettings, _specs(LifecycleSettings), "Lifecycle"),
+        GroupSpec(
+            "managed_team_channels",
+            ManagedTeamChannelSettings,
+            _specs(
+                ManagedTeamChannelSettings,
+                columns={
+                    "range_start": "managed_team_channel_range_start",
+                    "range_end": "managed_team_channel_range_end",
+                    "priority_ids": "managed_team_channel_priority_ids",
+                },
+            ),
+            "Managed team channels",
+        ),
         GroupSpec(
             "reconciliation",
             ReconciliationSettings,

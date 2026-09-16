@@ -71,6 +71,8 @@ def test_match_via_epg_tags_method_and_window(monkeypatch):
     assert out[0].match_method == MatchMethod.EPG
     assert out[0].epg_program_start == BASE
     assert out[0].epg_program_end == BASE + timedelta(hours=3)
+    # Exception keywords read the programme, not the stream name (#829).
+    assert out[0].epg_program_title == "MLB Baseball | Chicago Cubs at St. Louis Cardinals"
 
 
 def test_match_via_epg_passes_program_start_as_anchor(monkeypatch):

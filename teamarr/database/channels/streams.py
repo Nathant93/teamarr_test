@@ -52,6 +52,7 @@ def add_stream_to_channel(
         "exception_keyword",
         "match_type",
         "match_method",  # how matched ('epg', 'fuzzy', …); drives the epg_match ordering rule
+        "epg_program_title",  # matched programme title|sub_title; exception keywords (#829)
         "feed_team_id",  # resolved feed/matched team; drives team_feed rules (#489)
         "feed_side",  # 'home'/'away'; NULL = unknown. Drives home_feed/away_feed rules (#533)
         "dispatcharr_channel_group",  # DP channel group; drives dispatcharr_group rule (ybt.3)
@@ -512,6 +513,32 @@ def update_stream_window(
         )
         return True
     return False
+
+
+def update_stream_program_title(
+    conn: Connection,
+    managed_channel_id: int,
+    dispatcharr_stream_id: int,
+    epg_program_title: str,
+) -> bool:
+    """Refresh the matched EPG programme text of an attached stream (#829).
+
+    Keyword enforcement re-checks exception keywords from the stored row, so
+    the programme text must follow the guide: a stream attached before the
+    column existed, or whose best programme for the event changed, would
+    otherwise be judged on stale text. Targets the active row; returns True
+    when the value actually changed.
+    """
+    cursor = conn.execute(
+        """UPDATE managed_channel_streams
+           SET epg_program_title = ?
+           WHERE managed_channel_id = ?
+             AND dispatcharr_stream_id = ?
+             AND removed_at IS NULL
+             AND epg_program_title IS NOT ?""",
+        (epg_program_title, managed_channel_id, dispatcharr_stream_id, epg_program_title),
+    )
+    return cursor.rowcount > 0
 
 
 def reorder_channel_streams(

@@ -9,26 +9,43 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from teamarr.channelsdvr.client import ChannelsDVRClient
+from teamarr.consumers.generation_pipeline.models import (
+    CallbackCancellationToken,
+    GenerationCancelled,
+    GenerationResult,
+    GenerationSettingsSnapshot,
+    ProgressCallback,
+    ProgressUpdate,
+    legacy_progress_reporter,
+)
 from teamarr.dispatcharr import EPGManager, M3UManager
 from teamarr.dispatcharr.factory import DispatcharrConnection
 from teamarr.dispatcharr.managers import ChannelManager
 from teamarr.emby.client import EmbyClient
 from teamarr.jellyfin.client import JellyfinClient
-from teamarr.services import create_default_service
+from teamarr.services import TeamChannelManager, create_default_service
 from teamarr.services.sports_data import flush_shared_cache
 from teamarr.utilities import call_metrics
 from teamarr.utilities.xmltv import merge_xmltv_content
 
 logger = logging.getLogger(__name__)
 
-
-class GenerationCancelled(Exception):
-    """Raised when a generation run is cancelled by the user."""
+# GenerationCancelled, GenerationResult and ProgressCallback now live in
+# generation_pipeline.models and are re-exported here: this module is the
+# public composition root, and the API, the scheduler, teamarr.consumers and
+# several test modules import them from this path.
+__all__ = [
+    "GenerationCancelled",
+    "GenerationResult",
+    "ProgressCallback",
+    "run_full_generation",
+    "run_stream_ordering_only",
+]
 
 
 # Concurrency for the stream-order push phase (#735). Bounded well under the
@@ -45,56 +62,6 @@ _generation_running = False
 _media_refresh_lock = threading.Lock()
 
 
-@dataclass
-class GenerationResult:
-    """Result of a full EPG generation run."""
-
-    success: bool = True
-    error: str | None = None
-
-    # Timing
-    started_at: float = 0.0
-    completed_at: float = 0.0
-    duration_seconds: float = 0.0
-
-    # EPG stats
-    teams_processed: int = 0
-    teams_programmes: int = 0
-    groups_processed: int = 0
-    groups_programmes: int = 0
-    programmes_total: int = 0
-
-    # File output
-    file_written: bool = False
-    file_path: str | None = None
-    file_size: int = 0
-
-    # Sub-task results
-    m3u_refresh: dict = field(default_factory=dict)
-    stream_ordering: dict = field(default_factory=dict)
-    epg_refresh: dict = field(default_factory=dict)
-    epg_association: dict = field(default_factory=dict)
-    deletions: dict = field(default_factory=dict)
-    reconciliation: dict = field(default_factory=dict)
-    cleanup: dict = field(default_factory=dict)
-    logo_cleanup: dict = field(default_factory=dict)
-    channel_conflicts: dict = field(default_factory=dict)
-    emby_refresh: dict = field(default_factory=dict)
-    jellyfin_refresh: dict = field(default_factory=dict)
-    channelsdvr_refresh: dict = field(default_factory=dict)
-    channelsdvr_epg_refresh: dict = field(default_factory=dict)
-    # One entry per media server refreshed this run (#649): persisted on the
-    # run row so a server that fails every run is visible after the fact.
-    media_server_outcomes: list[dict] = field(default_factory=list)
-
-    # For stats run tracking
-    run_id: int | None = None
-
-    # Wall-clock seconds per generation phase (persisted to run stats so any
-    # two runs — local or live — can be compared phase-by-phase).
-    phase_timings: dict = field(default_factory=dict)
-
-
 class _PhaseTimer:
     """Records elapsed wall time between phase marks."""
 
@@ -106,11 +73,6 @@ class _PhaseTimer:
         now = time.time()
         self._timings[phase] = round(self._timings.get(phase, 0.0) + (now - self._last), 2)
         self._last = now
-
-
-# Type alias for progress callback
-# (phase: str, percent: int, message: str, current: int, total: int, item_name: str) -> None
-ProgressCallback = Callable[[str, int, str, int, int, str], None]
 
 
 def run_full_generation(
@@ -184,6 +146,11 @@ def run_full_generation(
     result = GenerationResult()
     result.started_at = time.time()
 
+    # Structured progress in, the public six-argument callback out. Stage
+    # bodies still call update_progress positionally; Packet 3 onward moves
+    # them onto ProgressUpdate as they are extracted.
+    report_progress = legacy_progress_reporter(progress_callback)
+
     def update_progress(
         phase: str,
         percent: int,
@@ -192,8 +159,16 @@ def run_full_generation(
         total: int = 0,
         item_name: str = "",
     ):
-        if progress_callback:
-            progress_callback(phase, percent, message, current, total, item_name)
+        report_progress(
+            ProgressUpdate(
+                phase=phase,
+                percent=percent,
+                message=message,
+                current=current,
+                total=total,
+                item_name=item_name,
+            )
+        )
 
     # Create stats run for tracking with database-level lock
     # Use BEGIN IMMEDIATE to acquire exclusive write lock BEFORE checking
@@ -248,10 +223,12 @@ def run_full_generation(
     # Import cancellation helpers
     from teamarr.consumers.generation_status import cancel_generation, is_cancellation_requested
 
-    def check_cancelled():
-        """Check if cancellation was requested and raise if so."""
-        if is_cancellation_requested():
-            raise GenerationCancelled("Cancelled by user")
+    # The token only raises. Persisting the cancelled run and calling
+    # cancel_generation() stay with the outer handler below, so no stage can
+    # half-finish a run. The import above runs per call, so patching
+    # generation_status.is_cancellation_requested still controls this.
+    cancellation = CallbackCancellationToken(requested=is_cancellation_requested)
+    check_cancelled = cancellation.checkpoint
 
     try:
         # Increment generation counter ONCE at start of full EPG run
@@ -272,11 +249,18 @@ def run_full_generation(
         # (Previously each consumer created its own service with a cold cache)
         shared_service = create_default_service()
 
-        # Get settings
+        # Get settings. Snapshotted together, in this order, on one connection:
+        # every stage below reads the values this run started with, so a
+        # setting edited mid-run cannot change behavior halfway through.
+        # Deliberately only these three — reconciliation, media-server,
+        # ordering and cleanup settings keep their phase-local reads and their
+        # own failure policies.
         with db_factory() as conn:
-            settings = get_epg_settings(conn)
-            dispatcharr_settings = get_dispatcharr_settings(conn)
-            display_settings = get_display_settings(conn)
+            settings = GenerationSettingsSnapshot(
+                epg=get_epg_settings(conn),
+                dispatcharr=get_dispatcharr_settings(conn),
+                display=get_display_settings(conn),
+            )
 
         timer = _PhaseTimer(result.phase_timings)
 
@@ -308,10 +292,30 @@ def run_full_generation(
                 msg = f"{name} ({current}/{total}) [{elapsed:.1f}s]"
             update_progress("teams", pct, msg, current, total, name)
 
-        team_result = process_all_teams(db_factory=db_factory, progress_callback=team_progress)
+        # Reuse the run-scoped service so teams share the warm event cache with
+        # group processing and lifecycle, instead of building a cold one here.
+        team_result = process_all_teams(
+            db_factory=db_factory,
+            progress_callback=team_progress,
+            service=shared_service,
+        )
         result.teams_processed = team_result.teams_processed
         result.teams_programmes = team_result.total_programmes
         timer.mark("teams")
+
+        # Persistent Team EPG channels are owned exclusively through
+        # managed_team_channels. Reconcile them after the XMLTV guide is written.
+        team_channels = (
+            dispatcharr_client
+            if isinstance(dispatcharr_client, DispatcharrConnection)
+            else None
+        )
+        team_channel_manager = TeamChannelManager(
+            db_factory,
+            team_channels.channels if team_channels else None,
+            team_channels.epg if team_channels else None,
+            team_channels.logos if team_channels else None,
+        )
 
         # Transition message - teams done, starting groups
         logger.info("[GENERATION] Sending transition message: teams -> groups")
@@ -366,6 +370,15 @@ def run_full_generation(
                 db_factory, external_occupied
             )
 
+        team_matched_streams: list[dict] = []
+        # Groups whose matching finished this run. Only their memberships are
+        # reconciled; a group that errored says nothing about its streams (#826).
+        team_completed_groups: set[int] = set()
+
+        def collect_team_matches(group_id: int, matches: list[dict]) -> None:
+            team_completed_groups.add(group_id)
+            team_matched_streams.extend({**match, "source_group_id": group_id} for match in matches)
+
         group_result = process_all_event_groups(
             db_factory=db_factory,
             dispatcharr_client=dispatcharr_client,
@@ -377,6 +390,7 @@ def run_full_generation(
             # whole guide a second time for a value nothing reads.
             aggregate_xmltv=False,
             run_id=stats_run.id,  # Details + per-group breakdown key on this run (#645)
+            matched_stream_callback=collect_team_matches,
         )
         result.groups_processed = group_result.groups_processed
         result.groups_programmes = group_result.total_programmes
@@ -385,11 +399,26 @@ def run_full_generation(
 
         # Step 3b: Global channel reassignment (if enabled)
         check_cancelled()
-        _sync_global_channels(
+        relayout = _sync_global_channels(
             db_factory, dispatcharr_client, update_progress,
             external_occupied=external_occupied,
         )
         timer.mark("channel_reassign")
+
+        # Step 3a: Reconcile persistent Team EPG channels and their stream
+        # memberships. Runs before ordering so the ordering pass pushes this
+        # run's memberships, not last run's. Guarded like every other step:
+        # a failure here must not stop event channels being created/deleted.
+        check_cancelled()
+        try:
+            result.managed_team_channels = team_channel_manager.sync(relayout=relayout)
+            result.managed_team_streams = team_channel_manager.sync_stream_memberships(
+                team_matched_streams, completed_group_ids=team_completed_groups
+            )
+        except Exception as e:  # noqa: BLE001 - per-step isolation
+            logger.exception("[GENERATION] Managed team channel sync failed: %s", e)
+            result.managed_team_channels = {"error": str(e)}
+        timer.mark("team_channels")
 
         # Step 3b: Apply stream ordering rules to all channels (93-95%)
         check_cancelled()
@@ -410,12 +439,12 @@ def run_full_generation(
             group_xmltv = get_all_group_xmltv(conn)
             xmltv_contents.extend(group_xmltv)
 
-        output_path = settings.epg_output_path
+        output_path = settings.epg.epg_output_path
         if xmltv_contents and output_path:
             merged_xmltv = merge_xmltv_content(
                 xmltv_contents,
-                generator_name=display_settings.xmltv_generator_name,
-                generator_url=display_settings.xmltv_generator_url,
+                generator_name=settings.display.xmltv_generator_name,
+                generator_url=settings.display.xmltv_generator_url,
             )
             output_file = Path(output_path)
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -441,7 +470,7 @@ def run_full_generation(
 
         # Step 5: Dispatcharr EPG refresh + channel association (96-98%)
         check_cancelled()
-        if dispatcharr_client and dispatcharr_settings.epg_id:
+        if dispatcharr_client and settings.dispatcharr.epg_id:
             update_progress("dispatcharr", 96, "Refreshing Dispatcharr EPG...")
 
             raw_client = (
@@ -451,7 +480,7 @@ def run_full_generation(
             )
             epg_manager = EPGManager(raw_client)
             refresh_result = epg_manager.wait_for_refresh(
-                dispatcharr_settings.epg_id,
+                settings.dispatcharr.epg_id,
                 timeout=300,
                 cancellation_check=is_cancellation_requested,
             )
@@ -463,8 +492,14 @@ def run_full_generation(
 
             update_progress("dispatcharr", 97, "Associating EPG with channels...")
             result.epg_association = lifecycle_service.associate_epg_with_channels(
-                dispatcharr_settings.epg_id
+                settings.dispatcharr.epg_id
             )
+            try:
+                result.epg_association["managed_team_channels"] = (
+                    team_channel_manager.associate_epg(settings.dispatcharr.epg_id)
+                )
+            except Exception as e:  # noqa: BLE001 - per-step isolation
+                logger.exception("[GENERATION] Managed team EPG association failed: %s", e)
         timer.mark("dispatcharr_epg_refresh")
 
         # Capture the configured guide refreshes now, then run them after the
@@ -1073,13 +1108,16 @@ def _sync_global_channels(
     dispatcharr_client: Any | None,
     update_progress: Callable,
     external_occupied: set[int] | None = None,
-) -> None:
+) -> bool:
     """Reassign channel numbers globally by sort priority.
 
     This is the single authoritative pass that pushes numbers to Dispatcharr.
     In sticky (gap/strict) modes it places only new channels, unless the daily
     reset window has arrived (should_run_channel_reset) — then it re-grids
     everything once.
+
+    Returns whether that full re-layout ran, so the managed team channel sync
+    can re-sort its own numbers in the same run (#810).
     """
     from teamarr.database.channel_numbers import (
         reassign_all_channels,
@@ -1095,7 +1133,7 @@ def _sync_global_channels(
             conn, external_occupied=external_occupied, force_reset=force_reset
         )
         if global_result["channels_moved"] == 0:
-            return
+            return force_reset
 
         logger.info(
             "[GENERATION] Global reassignment: %d channels processed, %d moved",
@@ -1104,7 +1142,7 @@ def _sync_global_channels(
         )
 
         if not dispatcharr_client:
-            return
+            return force_reset
 
         synced = 0
         for ch in global_result.get("drift_details", []):
@@ -1124,6 +1162,7 @@ def _sync_global_channels(
                     )
         if synced:
             logger.info("[GENERATION] Synced %d channel numbers to Dispatcharr", synced)
+        return force_reset
 
 
 @dataclass
@@ -1520,6 +1559,16 @@ def _apply_stream_ordering(
                     order_drifted,
                 )
                 pushes.append((plan, ordered_ids))
+
+        # Team channels are durable and use their own membership table, but
+        # their streams obey the same scoped ordering rules and windows. This
+        # opens its own connection and issues its own PATCHes, so it runs only
+        # once the block above has committed and closed (#735, #826).
+        team_ordering = TeamChannelManager(db_factory, channel_mgr).sync_stream_ordering()
+        reorder_result["managed_team_channels_reordered"] = team_ordering["channels"]
+        reorder_result["managed_team_streams_reordered"] = team_ordering["streams"]
+        if team_ordering["errors"]:
+            reorder_result["managed_team_order_errors"] = team_ordering["errors"]
 
         # Phase 3 (parallel, network only): issue the pushes. Outside the `with`
         # so the database connection is closed before any thread runs — every

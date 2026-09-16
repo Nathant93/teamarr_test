@@ -8,6 +8,7 @@ import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from teamarr.core import (
     SEASON_OFFSEASON,
@@ -24,9 +25,11 @@ from teamarr.core import (
 )
 from teamarr.core.sports import normalize_sport
 from teamarr.providers.espn.client import (
+    COLLEGE_SCOREBOARD_DIVISIONS,
     ESPN_TEAM_ID_CORRECTIONS,
     ESPNClient,
     league_publishes_rankings,
+    scoreboard_groups_for_divisions,
 )
 from teamarr.providers.espn.constants import STATUS_MAP, TOURNAMENT_SPORTS
 from teamarr.providers.espn.editorial_canary import EditorialDriftCanary
@@ -73,6 +76,11 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
         # events cache instead of fetching each day's scoreboard once per team —
         # so a league's daily scoreboard is fetched once per run, not N_teams times.
         self._cached_events_fn: Callable[[str, date], list[Event]] | None = None
+        # Optional per-league division selection (#811), injected at the
+        # database boundary in providers/__init__.py. Returns the divisions a
+        # league still ingests, or None for all of them — read per fetch, so a
+        # settings change lands on the next run rather than the next restart.
+        self._included_divisions_fn: Callable[[str], list[str] | None] | None = None
         # Drift canary (#506): warns if the editorial scoreboard keys the
         # empty-safe features rely on vanish from every payload (rename drift).
         self._editorial_canary = EditorialDriftCanary()
@@ -91,6 +99,35 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
         tests or cache refresh), the scan falls back to direct per-day fetches.
         """
         self._cached_events_fn = fn
+
+    def set_included_divisions_fn(self, fn: Callable[[str], list[str] | None] | None) -> None:
+        """Inject the per-league NCAA division selection lookup (#811).
+
+        When unset (provider used standalone, e.g. in tests or a bare cache
+        refresh), every division ESPN files under the league is fetched — the
+        behaviour before the setting existed.
+        """
+        self._included_divisions_fn = fn
+
+    def _scoreboard_groups(self, league: str) -> tuple[str, ...] | None:
+        """The scoreboard groups to request for ``league`` under the user's config.
+
+        None means "the league's full set" — the client's own default — so a
+        league with no optional divisions, an install with no selection, and a
+        failed lookup all take the identical path.
+        """
+        if self._included_divisions_fn is None:
+            return None
+        if league not in COLLEGE_SCOREBOARD_DIVISIONS:
+            return None
+        try:
+            divisions = self._included_divisions_fn(league)
+        except Exception as e:  # noqa: BLE001 — a config read must never fail a fetch
+            logger.warning("[ESPN] Division config lookup failed for %s: %s", league, e)
+            return None
+        if not divisions:
+            return None
+        return scoreboard_groups_for_divisions(league, divisions)
 
     def supports_league(self, league: str) -> bool:
         # Database is the source of truth
@@ -266,11 +303,20 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
         sport_league: tuple[str, str] | None,
     ) -> list[Event]:
         """Standard per-date scoreboard fetch (non-MMA, non-tournament)."""
-        date_str = target_date.strftime("%Y%m%d")
-        data = self._client.get_scoreboard(league, date_str, sport_league)
+        return self._scoreboard_events_for(league, target_date.strftime("%Y%m%d"), sport_league)
+
+    def _scoreboard_events_for(
+        self, league: str, date_str: str, sport_league: tuple[str, str] | None
+    ) -> list[Event]:
+        """One scoreboard request for ``date_str`` (a day or a ``A-B`` range), parsed."""
+        data = self._client.get_scoreboard(
+            league, date_str, sport_league, self._scoreboard_groups(league)
+        )
         if not data:
             return []
+        return self._parse_scoreboard_payload(data, league)
 
+    def _parse_scoreboard_payload(self, data: dict, league: str) -> list[Event]:
         # Capture league name from scoreboard for discovered leagues
         self._capture_league_name(data, league)
 
@@ -281,6 +327,58 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
                 events.append(event)
 
         return events
+
+    # ESPN files a scoreboard event under the US-Eastern date of its start
+    # (verified 2026-09-12: 161/161 events across MLB, NFL, NCAAF, EPL, La
+    # Liga). The span fetch below re-creates those buckets from a ranged
+    # response, so the service's per-day raw cache stays the cache of record.
+    SCOREBOARD_BUCKET_TZ = ZoneInfo("America/New_York")
+
+    def get_events_span(
+        self, league: str, start: date, end: date
+    ) -> dict[date, list[Event]] | None:
+        """The provider-day buckets ``start..end`` from ONE ranged scoreboard call (#808).
+
+        The date seam unions D-1, D and D+1 (#601); on a cold cache that was
+        three requests per league. ESPN accepts ``?dates=YYYYMMDD-YYYYMMDD``
+        and answers with the identical event set (measured over 16 league ×
+        weekend cases, including college football's per-conference ``groups``
+        calls), so the union costs one request. Returns the events keyed by
+        the bucket day ESPN would have filed them under, every day in the span
+        present (empty days included), so the caller can cache each bucket
+        exactly as a per-day fetch would have. ``None`` for the MMA and
+        tournament paths, which have their own windowing — the caller falls
+        back to per-day fetches.
+        ``None`` also when the request itself fails, so a blip on the range
+        endpoint costs nothing: the per-day fetches take over.
+        """
+        if end < start:
+            return None
+        sport_league = self._get_sport_league_from_db(league)
+        sport = self._get_sport(league)
+        if self._is_mma(league, sport) or sport in TOURNAMENT_SPORTS:
+            return None
+        data = self._client.get_scoreboard(
+            league, f"{start:%Y%m%d}-{end:%Y%m%d}", sport_league, self._scoreboard_groups(league)
+        )
+        if not data:
+            # A failed range request must not become three cached empty days;
+            # declining lets the caller fetch each day as before.
+            return None
+        events = self._parse_scoreboard_payload(data, league)
+        buckets: dict[date, list[Event]] = {}
+        day = start
+        while day <= end:
+            buckets[day] = []
+            day += timedelta(days=1)
+        for event in events:
+            bucket_day = event.start_time.astimezone(self.SCOREBOARD_BUCKET_TZ).date()
+            # A range answer is the union of its days; anything ESPN filed
+            # outside the asked-for days is not something a per-day fetch
+            # would have returned, so it is dropped rather than mis-filed.
+            if bucket_day in buckets:
+                buckets[bucket_day].append(event)
+        return buckets
 
     def get_sample_candidates(self, league: str) -> list[Event]:
         """Recent + upcoming events for a sample preview, in ≤2 calls.
@@ -318,7 +416,9 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
         by_id: dict[str, Event] = {}
         for date_str in (None, yesterday):  # None = ESPN default (most recent) slate
-            data = self._client.get_scoreboard(league, date_str, sport_league)
+            data = self._client.get_scoreboard(
+                league, date_str, sport_league, self._scoreboard_groups(league)
+            )
             if not data:
                 continue
             self._capture_league_name(data, league)
@@ -368,7 +468,10 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
         for _ in range(9):  # ~9 months back
             start = end - window
             data = self._client.get_scoreboard(
-                league, f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}", sport_league
+                league,
+                f"{start.strftime('%Y%m%d')}-{end.strftime('%Y%m%d')}",
+                sport_league,
+                self._scoreboard_groups(league),
             )
             finals = []
             for event_data in (data or {}).get("events", []):
@@ -518,7 +621,9 @@ class ESPNProvider(MMAParserMixin, TennisParserMixin, TournamentParserMixin, Spo
                 continue
 
             date_str = target_date.strftime("%Y%m%d")
-            data = self._client.get_scoreboard(league, date_str, sport_league)
+            data = self._client.get_scoreboard(
+                league, date_str, sport_league, self._scoreboard_groups(league)
+            )
             if not data:
                 continue
 

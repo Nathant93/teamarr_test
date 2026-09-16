@@ -12,6 +12,17 @@ in the database when possible.
 #
 # Format: normalized_variant -> english_name
 # All keys should be lowercase, already normalized (no accents via unidecode)
+#
+# Applied to BOTH sides of every comparison (#797): stream text through
+# normalize_for_matching, provider team names through normalize_text — both
+# call fuzzy_match.translate_cities. Translating only the stream side turned a
+# native spelling the provider itself uses ("Sevilla", "1. FC Nürnberg",
+# "F.C. København") into a guaranteed miss, because residual_contradicts reads
+# "nuremberg" vs "nurnberg" as two different teams.
+#
+# The pipeline translates text twice (normalize_for_matching, then
+# normalize_text on the result), so an english_name must never contain another
+# entry's variant.
 # =============================================================================
 
 CITY_TRANSLATIONS: dict[str, str] = {
@@ -115,6 +126,10 @@ TEAM_ALIASES: dict[str, str] = {
     "ol": "olympique lyonnais",
     "monaco": "as monaco",
     "lille": "lille osc",
+    # Greek Super League / UEFA — common transliteration used by Stan Sport;
+    # ESPN uses the Latinized club name without its city.
+    "olympiakos": "olympiacos",
+    "olympiakos piraeus": "olympiacos",
     # MLS
     "la galaxy": "los angeles galaxy",
     "galaxy": "los angeles galaxy",

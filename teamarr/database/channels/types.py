@@ -129,6 +129,9 @@ class ManagedChannelStream:
     exception_keyword: str | None = None
     match_type: str = "event"
     match_method: str | None = None  # 'epg', 'fuzzy', etc. — drives the epg_match ordering rule
+    # (#829) Matched EPG programme title|sub_title for EPG-matched streams;
+    # exception keywords are checked against it after the stream name.
+    epg_program_title: str | None = None
     # (#489) Resolved feed/matched team — provider team id, same namespace as
     # managed_channels.feed_team_id. Drives team_feed/not_team_feed ordering
     # rules ahead of the name regex. NULL = no team resolved for this stream.
@@ -202,6 +205,7 @@ class ManagedChannelStream:
             exception_keyword=row.get("exception_keyword"),
             match_type=row.get("match_type", "event"),
             match_method=row.get("match_method"),
+            epg_program_title=row.get("epg_program_title"),
             feed_team_id=row.get("feed_team_id"),
             feed_side=row.get("feed_side"),
             dispatcharr_channel_group=row.get("dispatcharr_channel_group"),

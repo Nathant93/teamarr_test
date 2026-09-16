@@ -47,7 +47,7 @@ Click the badge to toggle to **Sample** mode, which uses generic, intentionally-
 **Event templates** don't need suffixes - each channel exists for a single game, so there's no "next" or "last" to reference.
 
 {: .note }
-> **When there's no next (or last) game** — offseason, end of a season — suffixed variables resolve to empty and the usual cleanup removes leftover wrappers, so raw `{…}` braces never reach your guide. A misspelled variable name, or a suffix the variable doesn't support, still renders literally so you can spot the mistake. For a proper offseason message, use the **Offseason** idle register on the Fillers tab (enabled with generic content by default on new templates).
+> **When there's no next (or last) game** — offseason, an unpublished provider schedule, or the end of a season — suffixed variables resolve to empty and the usual cleanup removes leftover wrappers, so raw `{…}` braces never reach your guide. A misspelled variable name, or a suffix the variable doesn't support, still renders literally so you can spot the mistake. For a proper no-schedule message, use the idle no-schedule overrides on the Fillers tab. Each enabled field replaces its corresponding normal idle field.
 
 In the tables below, the **Suffixes** column indicates which suffixes are available:
 - **base** = no suffix (current game)
@@ -64,6 +64,8 @@ Three template fields hold image URLs and accept the same variables as any other
 |-------|----------|
 | **Program Art URL** (`program_art_url`) | the programme `<icon>` in the EPG (per-game artwork) |
 | **Channel Logo URL** (`event_channel_logo_url`, event templates) | the Dispatcharr channel logo **and** the EPG channel icon |
+| **Team Channel Logo URL** (`team_channel_logo_url`, team templates) | logo for an opt-in managed Team EPG channel |
+| **Team Channel Name** (`team_channel_name`, team templates) | XMLTV and managed Dispatcharr channel name |
 | **Filler Art URL** (pregame/postgame/idle `art_url`) | artwork on filler programmes |
 
 ### Game-Thumbs base URL
@@ -411,7 +413,8 @@ Season type indicators. All providers normalize their native season codes to a c
 |----------|-------------------|
 | ESPN | Full — derived from season slug (`post-season`, `semifinals`, etc.) with numeric-type fallback |
 | MLB Stats | Full — `gameType` codes (`F`/`D`/`L`/`W`/`P` → postseason, `S`/`E` → preseason) |
-| HockeyTech | Full — via per-season `playoff` flag (CHL, AHL, PWHL, USHL) |
+| Bell Media | Full — via `seasonTypeId` (CHL, OHL, WHL, QMJHL, AHL, PWHL) |
+| HockeyTech | Full — via per-season `playoff` flag (ECHL, USHL, Junior A) |
 | TSDB | Partial — postseason detected via special `intRound` codes (125/150/160/170/180/200) used by some leagues (NBA, NHL, IPL, European knockouts). Leagues that keep normal round numbering through finals (AFL, NRL, boxing) can't be detected and return empty. Preseason is never detected for TSDB. |
 
 ---

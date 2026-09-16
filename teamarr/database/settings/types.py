@@ -25,6 +25,10 @@ class DispatcharrSettings:
     default_channel_group_id: int | None = None
     # Channel group mode: 'static', 'sport', 'league', or custom pattern like '{sport} | {league}'
     default_channel_group_mode: str = "static"
+    # Dedicated output defaults for persistent Team EPG channels. These do not
+    # inherit event-channel defaults: None means no group / all profiles.
+    managed_team_channel_profile_ids: list[int | str] | None = None
+    managed_team_channel_group_id: int | None = None
     # When True, call Dispatcharr's /api/channels/logos/cleanup/ after generation
     # This removes ALL unused logos in Dispatcharr, not just ones Teamarr uploaded
     cleanup_unused_logos: bool = False
@@ -50,6 +54,15 @@ class LifecycleSettings:
     channel_post_buffer_minutes: int = 60
     channel_range_start: int = 101
     channel_range_end: int | None = None
+
+
+@dataclass
+class ManagedTeamChannelSettings:
+    """Numbering settings for persistent, opt-in Team EPG channels."""
+
+    range_start: int = 9000
+    range_end: int | None = None
+    priority_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -402,6 +415,9 @@ class AllSettings:
 
     dispatcharr: DispatcharrSettings = field(default_factory=DispatcharrSettings)
     lifecycle: LifecycleSettings = field(default_factory=LifecycleSettings)
+    managed_team_channels: ManagedTeamChannelSettings = field(
+        default_factory=ManagedTeamChannelSettings
+    )
     reconciliation: ReconciliationSettings = field(default_factory=ReconciliationSettings)
     scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
     epg: EPGSettings = field(default_factory=EPGSettings)

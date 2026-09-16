@@ -26,11 +26,11 @@ Leagues have different levels of support:
 | Provider | Description |
 |----------|-------------|
 | **ESPN** | Primary provider for most US leagues and international soccer. Discovers ~228 soccer leagues dynamically. |
-| **Bell Media** | Canadian Football League via TSN's public sports widget API. |
+| **Bell Media** | CFL plus CHL, OHL, WHL, QMJHL, AHL, and PWHL via TSN's public sports widget API. |
 | **NASCAR** | NASCAR Cup, O'Reilly (Xfinity), and Truck series via the official cf.nascar.com schedule API. Full race-weekend sessions, no API key required. See [provider docs](providers/nascar). |
 | **MLB Stats API** | Minor League Baseball (MiLB) — Triple-A, Double-A, High-A, Single-A, Rookie |
 | **Squiggle** | AFL (Australian Football League). Free, no API key required. See [provider docs](providers/squiggle). |
-| **HockeyTech** | Canadian and US junior/minor hockey leagues (CHL, AHL, ECHL, PWHL, USHL, Junior A) |
+| **HockeyTech** | Canadian and US junior/minor hockey leagues (ECHL, USHL, Junior A) |
 | **Supabase** | Supabase-backed leagues such as the Canadian Baseball League (CBL). No API key required. See [provider docs](providers/supabase). |
 | **TheSportsDB** | Rugby, cricket, boxing, Scandinavian leagues, and more. Requires a [premium API key](providers/tsdb.md). |
 
@@ -89,18 +89,18 @@ NCAA Football aggregates ESPN's FBS, FCS, lower-division, and cross-division fix
 
 | League | ID | Provider |
 |--------|-----|----------|
-| Canadian Hockey League | `chl` | HockeyTech |
-| Ontario Hockey League | `ohl` | HockeyTech |
-| Western Hockey League | `whl` | HockeyTech |
-| Quebec Major Junior Hockey League | `qmjhl` | HockeyTech |
+| Canadian Hockey League | `chl` | Bell Media |
+| Ontario Hockey League | `ohl` | Bell Media |
+| Western Hockey League | `whl` | Bell Media |
+| Quebec Major Junior Hockey League | `qmjhl` | Bell Media |
 
 ### Pro/Minor Pro
 
 | League | ID | Provider |
 |--------|-----|----------|
-| American Hockey League | `ahl` | HockeyTech |
+| American Hockey League | `ahl` | Bell Media |
 | East Coast Hockey League | `echl` | HockeyTech |
-| Professional Women's Hockey League | `pwhl` | HockeyTech |
+| Professional Women's Hockey League | `pwhl` | Bell Media |
 
 ### US Junior
 

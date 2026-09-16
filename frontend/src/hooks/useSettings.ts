@@ -39,6 +39,7 @@ import {
   getFeedSeparationSettings,
   updateFeedSeparationSettings,
   getLeagueConfigs,
+  getLeagueDivisions,
   upsertLeagueConfig,
   deleteLeagueConfig,
   getEmbySettings,
@@ -55,6 +56,8 @@ import {
   getProxyProviders,
   getProxySettings,
   updateProxySettings,
+  getManagedTeamChannelSettings,
+  updateManagedTeamChannelSettings,
 } from "@/api/settings"
 
 // ---------------------------------------------------------------------------
@@ -113,6 +116,15 @@ export const useUpdateDispatcharrSettings = settingsMutationHook(updateDispatcha
 export const useUpdateLifecycleSettings = settingsMutationHook(updateLifecycleSettings, [
   ["settings", "channel-numbering"],
 ])
+
+export const useManagedTeamChannelSettings = settingsQueryHook(
+  "managed-team-channels",
+  getManagedTeamChannelSettings,
+)
+export const useUpdateManagedTeamChannelSettings = settingsMutationHook(
+  updateManagedTeamChannelSettings,
+  [["settings", "managed-team-channels"]],
+)
 
 export const useSchedulerSettings = settingsQueryHook("scheduler", getSchedulerSettings)
 export const useUpdateSchedulerSettings = settingsMutationHook(updateSchedulerSettings, [
@@ -405,6 +417,14 @@ export function useLeagueConfigs() {
   })
 }
 
+export function useLeagueDivisions() {
+  return useQuery({
+    queryKey: ["league-divisions"],
+    queryFn: getLeagueDivisions,
+    staleTime: Infinity, // a static catalog compiled into the backend
+  })
+}
+
 export function useUpsertLeagueConfig() {
   const queryClient = useQueryClient()
 
@@ -415,6 +435,8 @@ export function useUpsertLeagueConfig() {
         channel_profile_ids?: (number | string)[] | null
         channel_group_id?: number | null
         channel_group_mode?: string | null
+        matchup_order?: string | null
+        included_divisions?: string[] | null
       }
     }) => upsertLeagueConfig(leagueCode, data),
     onSuccess: () => {

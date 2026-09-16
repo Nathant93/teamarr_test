@@ -1,7 +1,7 @@
 """HockeyTech sports data provider.
 
 Fetches data from HockeyTech API and normalizes into our dataclass format.
-Used for CHL leagues (OHL, WHL, QMJHL) plus AHL, PWHL, USHL.
+Used for ECHL, USHL, and Canadian Junior A leagues.
 """
 
 import logging
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class HockeyTechProvider(SportsProvider):
     """HockeyTech implementation of SportsProvider.
 
-    Handles CHL leagues (OHL, WHL, QMJHL) plus AHL, PWHL, USHL.
+    Handles ECHL, USHL, and Canadian Junior A leagues.
     """
 
     # HockeyTech's schedule feed leaves `game_type` empty. The `seasons` view
