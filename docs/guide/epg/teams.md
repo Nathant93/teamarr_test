@@ -63,7 +63,7 @@ Each team needs a **team template** assigned — see [Team vs Event](team-vs-eve
 
 ### Managed Channels
 
-The edit dialog can enable a persistent managed channel for a team. Turning it on also activates the team, because Teamarr needs its guide data to manage the channel. Set an optional channel-number override there, or leave it automatic.
+The edit dialog can enable a persistent managed channel for a team. Turning it on also activates the team, because Teamarr needs its guide data to manage the channel. Set an optional channel-number override there, or leave it automatic. To switch management on or off for many teams at once, select their rows and use the **Managed Channel** bulk action; numbers are always assigned automatically that way.
 
 Configure the automatic **Managed Team EPG Channels** range and choose priority teams in **Channels → Numbering**. Priority teams are numbered first when channels are created. This range is independent from event-channel numbering, so ordinary channel blocks do not consume it. Automatic numbers follow the [Number Stability](../channels/numbering#number-stability) mode: Compact re-sorts them every run, Gapped and Strict hold them until the daily re-layout. An explicit override pins a number; a collision with another channel moves it.
 
