@@ -266,6 +266,8 @@ export function Teams() {
   const [showBulkTemplate, setShowBulkTemplate] = useState(false)
   const [showBulkDelete, setShowBulkDelete] = useState(false)
   const [showBulkChannelId, setShowBulkChannelId] = useState(false)
+  const [showBulkManaged, setShowBulkManaged] = useState(false)
+  const [bulkManagedEnabled, setBulkManagedEnabled] = useState(true)
   const [channelIdMode, setChannelIdMode] = useState<"default" | "custom">("default")
   const [customChannelIdFormat, setCustomChannelIdFormat] = useState("")
   const [isUpdatingChannelIds, setIsUpdatingChannelIds] = useState(false)
@@ -457,6 +459,29 @@ export function Teams() {
     setSelectedIds(new Set())
     setShowBulkTemplate(false)
     setBulkTemplateId(null)
+  }
+
+  // Same per-team PATCH as the edit dialog, so turning management on still
+  // activates the team server-side (#826). No number override in bulk.
+  const handleBulkSetManaged = async () => {
+    const ids = Array.from(selectedIds)
+    let succeeded = 0
+    for (const id of ids) {
+      try {
+        await updateMutation.mutateAsync({
+          teamId: id,
+          data: { managed_channel_enabled: bulkManagedEnabled },
+        })
+        succeeded++
+      } catch {
+        // Continue with others
+      }
+    }
+    toast.success(
+      `${bulkManagedEnabled ? "Enabled" : "Disabled"} managed channels for ${succeeded} team${succeeded !== 1 ? "s" : ""}`
+    )
+    setSelectedIds(new Set())
+    setShowBulkManaged(false)
   }
 
   const handleBulkDelete = async () => {
@@ -687,6 +712,9 @@ export function Teams() {
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setShowBulkChannelId(true)}>
                   Channel ID
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowBulkManaged(true)}>
+                  Managed Channel
                 </Button>
                 <Button variant="destructive" size="sm" onClick={() => setShowBulkDelete(true)}>
                   <Trash2 className="h-3 w-3 mr-1" />
@@ -1078,6 +1106,39 @@ export function Teams() {
             <Button onClick={handleBulkAssignTemplate} disabled={updateMutation.isPending}>
               {updateMutation.isPending && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
               Assign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Managed Channel Dialog */}
+      <Dialog open={showBulkManaged} onOpenChange={setShowBulkManaged}>
+        <DialogContent onClose={() => setShowBulkManaged(false)}>
+          <DialogHeader>
+            <DialogTitle>Managed Channel</DialogTitle>
+            <DialogDescription>
+              Set persistent channel management for {selectedIds.size} selected team
+              {selectedIds.size !== 1 && "s"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <Switch checked={bulkManagedEnabled} onCheckedChange={setBulkManagedEnabled} />
+              <Label className="font-normal">Manage persistent Dispatcharr channel</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {bulkManagedEnabled
+                ? "Creates and keeps each team's Team EPG channel in the dedicated managed-team range. Channel numbers are assigned automatically; teams are activated."
+                : "Releases each team's managed channel on the next generation. Any channel number override is kept for later."}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkManaged(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkSetManaged} disabled={updateMutation.isPending}>
+              {updateMutation.isPending && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
+              Apply to {selectedIds.size} Team{selectedIds.size !== 1 && "s"}
             </Button>
           </DialogFooter>
         </DialogContent>
