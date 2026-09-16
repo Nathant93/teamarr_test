@@ -14,12 +14,15 @@ class SchedulerStatus:
     """Status of the scheduler."""
 
     running: bool = False
+    mode: str = "pre_match"  # "pre_match" | "cron"
+    cron_expression: str = "0 * * * *"
     pre_match_lead_minutes: int = 30
     discovery_interval_hours: int = 4
     last_run: datetime | None = None
     next_run: datetime | None = None
-    next_run_reason: str | None = None  # "pre_match" | "discovery"
+    next_run_reason: str | None = None  # "pre_match" | "discovery" | "cron"
     next_match_start: datetime | None = None
+    next_match_sport: str | None = None
 
 
 @dataclass
@@ -51,26 +54,32 @@ class SchedulerService:
 
     def start(
         self,
+        mode: str | None = None,
         pre_match_lead_minutes: int | None = None,
         discovery_interval_hours: int | None = None,
+        cron_expression: str | None = None,
     ) -> bool:
         """Start the scheduler.
 
         Args:
-            pre_match_lead_minutes: Minutes before a match to trigger
-                generation (None = use settings)
-            discovery_interval_hours: Fallback discovery cadence in hours
-                (None = use settings)
+            mode: "pre_match" or "cron" (None = use settings)
+            pre_match_lead_minutes: (pre_match mode) Minutes before a match
+                to trigger generation (None = use settings)
+            discovery_interval_hours: (pre_match mode) Fallback discovery
+                cadence in hours (None = use settings)
+            cron_expression: (cron mode) Cron expression (None = use settings)
 
         Returns:
-            True if started, False if already running or disabled
+            True if started, False if already running, disabled, or invalid
         """
         from teamarr.consumers.scheduler import start_lifecycle_scheduler
 
         return start_lifecycle_scheduler(
             self._db_factory,
+            mode=mode,
             pre_match_lead_minutes=pre_match_lead_minutes,
             discovery_interval_hours=discovery_interval_hours,
+            cron_expression=cron_expression,
             dispatcharr_client=self._client,
         )
 
@@ -98,6 +107,8 @@ class SchedulerService:
         status = get_scheduler_status()
         return SchedulerStatus(
             running=status.get("running", False),
+            mode=status.get("mode", "pre_match"),
+            cron_expression=status.get("cron_expression", "0 * * * *"),
             pre_match_lead_minutes=status.get("pre_match_lead_minutes", 30),
             discovery_interval_hours=status.get("discovery_interval_hours", 4),
             last_run=(
@@ -112,6 +123,7 @@ class SchedulerService:
                 if status.get("next_match_start")
                 else None
             ),
+            next_match_sport=status.get("next_match_sport"),
         )
 
     def run_once(self) -> SchedulerRunResult:
