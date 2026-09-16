@@ -126,6 +126,10 @@ TEAM_ALIASES: dict[str, str] = {
     "ol": "olympique lyonnais",
     "monaco": "as monaco",
     "lille": "lille osc",
+    # Greek Super League / UEFA — common transliteration used by Stan Sport;
+    # ESPN uses the Latinized club name without its city.
+    "olympiakos": "olympiacos",
+    "olympiakos piraeus": "olympiacos",
     # MLS
     "la galaxy": "los angeles galaxy",
     "galaxy": "los angeles galaxy",
